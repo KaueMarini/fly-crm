@@ -1,62 +1,52 @@
 import { Client } from '@notionhq/client';
 
-// Inicializa o cliente do Notion
-const notion = new Client({ auth: process.env.NOTION_KEY }) as any;
+// Verifica se as chaves existem antes de tentar conectar
+if (!process.env.NOTION_KEY) {
+  throw new Error("🚨 ERRO CRÍTICO: A variável NOTION_KEY não foi encontrada no arquivo .env.local");
+}
+if (!process.env.NOTION_DATABASE_ID) {
+  throw new Error("🚨 ERRO CRÍTICO: A variável NOTION_DATABASE_ID não foi encontrada no arquivo .env.local");
+}
+
+// Inicializa o cliente (sem 'as any' para o TypeScript validar)
+const notion = new Client({
+  auth: process.env.NOTION_KEY,
+});
 
 export async function getLeads() {
-  const databaseId = process.env.NOTION_DATABASE_ID;
-
-  if (!databaseId) {
-    throw new Error("❌ ID do Banco de Dados não encontrado no .env.local");
-  }
-
   try {
-    const response = await notion.databases.query({
+    const databaseId = process.env.NOTION_DATABASE_ID as string;
+
+    const response = await (notion.databases as any).query({
       database_id: databaseId,
       sorts: [
         {
-          timestamp: 'created_time', // Ordena pelos mais recentes
+          timestamp: 'created_time',
           direction: 'descending',
         },
       ],
     });
 
-    // Mapeia e limpa os dados para um formato simples
+    // Mapeia os dados (protegendo contra campos vazios)
     const leads = response.results.map((page: any) => {
       const props = page.properties;
-
       return {
         id: page.id,
-        // ⚠️ IMPORTANTE: Os nomes aqui ('Nome', 'Telefone', etc) devem ser IDÊNTICOS
-        // aos nomes das colunas lá no seu Notion (Maiúsculas/Minúsculas importam).
-        
-        // 1. Nome (Geralmente é do tipo Title)
         nome: props.Nome?.title?.[0]?.plain_text || 'Sem Nome',
-        
-        // 2. Telefone (Pode ser Texto ou Phone)
         telefone: props.Telefone?.rich_text?.[0]?.plain_text || 
-                  props.Telefone?.phone_number || 
-                  'Sem Telefone',
-        
-        // 3. Status (Select ou Texto)
+                  props.Telefone?.phone_number || 'Sem Telefone',
         status: props.Status?.select?.name || 
-                props.Status?.rich_text?.[0]?.plain_text || 
-                'Novo',
-        
-        // 4. Cidade (Select ou Texto)
+                props.Status?.rich_text?.[0]?.plain_text || 'Novo',
         cidade: props.Cidade?.select?.name || 
-                props.Cidade?.rich_text?.[0]?.plain_text || 
-                'Não informada',
-        
-        // 5. Lead Score (Number)
+                props.Cidade?.rich_text?.[0]?.plain_text || 'Não informada',
         leadScore: props.LeadScore?.number || props['Lead Score']?.number || 0,
       };
     });
 
     return leads;
 
-  } catch (error) {
-    console.error("❌ Erro ao buscar dados do Notion:", error);
-    return []; // Retorna lista vazia para não quebrar o site
+  } catch (error: any) {
+    console.error("❌ ERRO AO BUSCAR NO NOTION:", error.message);
+    return []; // Retorna lista vazia para a página não quebrar
   }
 }
