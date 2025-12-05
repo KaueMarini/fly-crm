@@ -25,27 +25,43 @@ export async function getLeads() {
 
     const response = await notion.dataSources.query({
       data_source_id: dataSourceId,
-      sorts: [
-        {
-          timestamp: 'created_time',
-          direction: 'descending',
-        },
-      ],
+      sorts: [{ timestamp: 'created_time', direction: 'descending' }],
     });
 
     const leads = response.results.map((page: any) => {
       const props = page.properties;
 
-      // Mapeamento baseado no seu print do Notion
       const telefone = props.Telefone?.title?.[0]?.plain_text || 'Sem Telefone';
       const nome = props.Nome?.rich_text?.[0]?.plain_text || 'Sem Nome';
-      
-      // Captura o Resumo (para tabela de últimos ativos)
       const resumo = props.Resumo?.rich_text?.[0]?.plain_text || 'Sem interesse registrado';
-
-      // Captura Data: Tenta a coluna 'Data' do Notion, senão usa a data de criação do sistema
       const dataCriacao = props.Data?.date?.start || page.created_time;
 
+      // --- CORREÇÃO: Tratamento de Localização Múltipla ---
+      const locProp = props['Localização De Interesse'] || 
+                      props['Localização de Interesse'] || 
+                      props['Localização'];
+      
+      let cidades: string[] = [];
+
+      if (locProp) {
+        if (locProp.type === 'multi_select') {
+          // Se for Multi-Select no Notion, pega todas as tags
+          cidades = locProp.multi_select.map((opt: any) => opt.name);
+        } else if (locProp.type === 'select') {
+          // Se for Select simples
+          if (locProp.select?.name) cidades.push(locProp.select.name);
+        } else if (locProp.type === 'rich_text') {
+          // Se for Texto, quebra nas vírgulas (ex: "Itapema, Porto Belo")
+          const text = locProp.rich_text[0]?.plain_text || '';
+          if (text) {
+            cidades = text.split(',').map((c: string) => c.trim()).filter((c: string) => c !== '');
+          }
+        }
+      }
+
+      if (cidades.length === 0) cidades = ['Não informada'];
+
+      // --- Status e Score ---
       const statusRaw = props.Leadscore?.rich_text?.[0]?.plain_text || 
                         props.Leadscore?.select?.name || 
                         'Novo';
@@ -56,15 +72,25 @@ export async function getLeads() {
       else if (statusLower.includes('morno')) scoreNum = 50;
       else if (statusLower.includes('frio')) scoreNum = 20;
 
+      // --- Perfil ---
+      const resumoLower = resumo.toLowerCase();
+      let perfil = 'Geral';
+      if (resumoLower.includes('investimento') || resumoLower.includes('investidor')) {
+        perfil = 'Investidor';
+      } else if (resumoLower.includes('moradia') || resumoLower.includes('morar')) {
+        perfil = 'Moradia';
+      }
+
       return {
         id: page.id,
         nome: nome,
         telefone: telefone,
         status: statusRaw,
-        cidade: "Não informada",
+        cidades: cidades, // Agora é um ARRAY (Lista)
         interesse: resumo,
         createdAt: dataCriacao,
         leadScore: scoreNum,
+        perfil: perfil,
       };
     });
 
