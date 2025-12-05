@@ -9,7 +9,8 @@ import {
   Settings, 
   LogOut, 
   Lightbulb, 
-  MessageSquare 
+  MessageSquare,
+  SquareKanban // Ícone para o Kanban
 } from 'lucide-react';
 
 export function Sidebar() {
@@ -23,14 +24,12 @@ export function Sidebar() {
   return (
     <aside className="w-64 bg-slate-950 h-screen fixed left-0 top-0 text-slate-300 flex flex-col border-r border-slate-800 shadow-2xl z-50">
       
-      {/* Cabeçalho */}
       <div className="p-6 border-b border-slate-800">
         <h1 className="text-2xl font-bold text-white flex items-center gap-2 tracking-tight">
           🦅 Fly<span className="text-blue-500">CRM</span>
         </h1>
       </div>
 
-      {/* Menu Principal */}
       <nav className="flex-1 p-4 space-y-2">
         <NavItem 
           href="/" 
@@ -38,12 +37,28 @@ export function Sidebar() {
           label="Dashboard" 
           active={isActive('/')} 
         />
+        
+        <div className="pt-4 pb-2 pl-4 text-xs font-semibold text-slate-500 uppercase tracking-wider">
+          Vendas
+        </div>
+
+        <NavItem 
+          href="/kanban" 
+          icon={<SquareKanban size={20} />} 
+          label="Pipeline / Funil" 
+          active={isActive('/kanban')} 
+        />
         <NavItem 
           href="/leads" 
           icon={<Users size={20} />} 
-          label="Gestão de Leads" 
+          label="Lista de Leads" 
           active={isActive('/leads')} 
         />
+        
+        <div className="pt-4 pb-2 pl-4 text-xs font-semibold text-slate-500 uppercase tracking-wider">
+          Inteligência
+        </div>
+
         <NavItem 
           href="/insights" 
           icon={<Lightbulb size={20} />} 
@@ -64,7 +79,6 @@ export function Sidebar() {
         />
       </nav>
 
-      {/* Rodapé */}
       <div className="p-4 border-t border-slate-800">
         <NavItem 
           href="/settings" 
@@ -81,7 +95,6 @@ export function Sidebar() {
   );
 }
 
-// Componente de Item de Navegação
 function NavItem({ href, icon, label, active = false }: { href: string, icon: React.ReactNode, label: string, active?: boolean }) {
   return (
     <Link 
