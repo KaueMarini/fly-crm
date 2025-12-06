@@ -1,19 +1,26 @@
+// types/kanban.ts
 export type Lead = {
   id: string;
   nome: string;
-  empresa?: string;
   telefone: string;
-  status: string; // A coluna do Kanban
-  funil: string;  // 'vendas' | 'locacao' | 'pos-venda'
+  status: string; // Ex: "Novo Lead", "Em Contato" (Nome exato do Notion)
+  funil: string;  // Ex: "Vendas", "Locação"
   score: number;
-  valor?: number;
+  empresa?: string;
+  createdAt: string;
 };
 
-export type Column = {
-  id: string;
+export type KanbanStage = {
+  id: string; // Nome exato do status no Notion (Ex: "Novo Lead")
   title: string;
   color: string;
   rules?: {
-    requireObservation?: boolean; // Regra: Exige observação ao entrar aqui?
+    requireObs?: boolean;
   };
+};
+
+export type Pipeline = {
+  id: string; // Ex: "vendas"
+  title: string;
+  stages: KanbanStage[];
 };

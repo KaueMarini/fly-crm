@@ -1,103 +1,85 @@
 import { Client } from '@notionhq/client';
 
-if (!process.env.NOTION_KEY) {
-  throw new Error("🚨 ERRO CRÍTICO: A variável NOTION_KEY não foi encontrada no arquivo .env.local");
-}
-if (!process.env.NOTION_DATABASE_ID) {
-  throw new Error("🚨 ERRO CRÍTICO: A variável NOTION_DATABASE_ID não foi encontrada no arquivo .env.local");
+if (!process.env.NOTION_KEY) throw new Error("Missing NOTION_KEY");
+if (!process.env.NOTION_DATABASE_ID) throw new Error("Missing NOTION_DATABASE_ID");
+
+const notion = new Client({ auth: process.env.NOTION_KEY });
+
+// --- 1. Função para Ler as Etapas (Colunas) do Notion ---
+export async function getPipelineStages() {
+  const databaseId = process.env.NOTION_DATABASE_ID as string;
+  
+  const response = await notion.databases.retrieve({ database_id: databaseId });
+  const properties = response.properties as any;
+  
+  // Verifica se existe a coluna Status
+  const statusProp = properties['Status'];
+  
+  if (!statusProp || statusProp.type !== 'select') {
+      return [];
+  }
+
+  // Retorna as opções na ordem que estão no Notion
+  return statusProp.select.options.map((opt: any) => ({
+      id: opt.name, // O ID será o próprio nome (Ex: "Novo Lead")
+      title: opt.name,
+      color: mapColor(opt.color)
+  }));
 }
 
-const notion = new Client({
-  auth: process.env.NOTION_KEY,
-});
-
+// --- 2. Função para Ler os Leads ---
 export async function getLeads() {
   try {
     const databaseId = process.env.NOTION_DATABASE_ID as string;
-
-    const database = await notion.databases.retrieve({ database_id: databaseId });
-    const dataSources = (database as any).data_sources;
-    
-    if (!dataSources || dataSources.length === 0) {
-      throw new Error("Nenhuma fonte de dados encontrada.");
-    }
-    const dataSourceId = dataSources[0].id;
-
-    const response = await notion.dataSources.query({
-      data_source_id: dataSourceId,
+    const response = await notion.databases.query({
+      database_id: databaseId,
       sorts: [{ timestamp: 'created_time', direction: 'descending' }],
     });
 
-    const leads = response.results.map((page: any) => {
+    return response.results.map((page: any) => {
       const props = page.properties;
 
       const telefone = props.Telefone?.title?.[0]?.plain_text || 'Sem Telefone';
       const nome = props.Nome?.rich_text?.[0]?.plain_text || 'Sem Nome';
-      const resumo = props.Resumo?.rich_text?.[0]?.plain_text || 'Sem interesse registrado';
-      const dataCriacao = props.Data?.date?.start || page.created_time;
-
-      // --- CORREÇÃO: Tratamento de Localização Múltipla ---
-      const locProp = props['Localização De Interesse'] || 
-                      props['Localização de Interesse'] || 
-                      props['Localização'];
+      const status = props.Status?.select?.name || 'Novo Lead';
+      const funil = props.Funil?.select?.name || 'Vendas'; // Se tiver coluna Funil
       
-      let cidades: string[] = [];
-
-      if (locProp) {
-        if (locProp.type === 'multi_select') {
-          // Se for Multi-Select no Notion, pega todas as tags
-          cidades = locProp.multi_select.map((opt: any) => opt.name);
-        } else if (locProp.type === 'select') {
-          // Se for Select simples
-          if (locProp.select?.name) cidades.push(locProp.select.name);
-        } else if (locProp.type === 'rich_text') {
-          // Se for Texto, quebra nas vírgulas (ex: "Itapema, Porto Belo")
-          const text = locProp.rich_text[0]?.plain_text || '';
-          if (text) {
-            cidades = text.split(',').map((c: string) => c.trim()).filter((c: string) => c !== '');
-          }
-        }
-      }
-
-      if (cidades.length === 0) cidades = ['Não informada'];
-
-      // --- Status e Score ---
-      const statusRaw = props.Leadscore?.rich_text?.[0]?.plain_text || 
-                        props.Leadscore?.select?.name || 
-                        'Novo';
-
-      let scoreNum = 0;
-      const statusLower = statusRaw.toLowerCase();
-      if (statusLower.includes('quente')) scoreNum = 90;
-      else if (statusLower.includes('morno')) scoreNum = 50;
-      else if (statusLower.includes('frio')) scoreNum = 20;
-
-      // --- Perfil ---
-      const resumoLower = resumo.toLowerCase();
-      let perfil = 'Geral';
-      if (resumoLower.includes('investimento') || resumoLower.includes('investidor')) {
-        perfil = 'Investidor';
-      } else if (resumoLower.includes('moradia') || resumoLower.includes('morar')) {
-        perfil = 'Moradia';
-      }
+      // Score
+      const scoreTag = props.Leadscore?.select?.name || 'Frio';
+      let scoreNum = 20;
+      if (scoreTag.toLowerCase().includes('quente')) scoreNum = 90;
+      else if (scoreTag.toLowerCase().includes('morno')) scoreNum = 50;
 
       return {
         id: page.id,
-        nome: nome,
-        telefone: telefone,
-        status: statusRaw,
-        cidades: cidades, // Agora é um ARRAY (Lista)
-        interesse: resumo,
-        createdAt: dataCriacao,
-        leadScore: scoreNum,
-        perfil: perfil,
+        nome,
+        telefone,
+        status, // Agora usamos o nome real do Notion (Ex: "Em Contato") como ID
+        funil,
+        score: scoreNum,
+        createdAt: page.created_time,
       };
     });
 
-    return leads;
-
   } catch (error: any) {
-    console.error("❌ ERRO NO NOTION:", error.message);
+    console.error("Erro Notion:", error);
     return [];
   }
+}
+
+// Auxiliar: Traduz cores do Notion para Tailwind
+function mapColor(notionColor: string) {
+    const colors: Record<string, string> = {
+        'default': 'bg-slate-500',
+        'gray': 'bg-slate-500',
+        'brown': 'bg-orange-800',
+        'orange': 'bg-orange-500',
+        'yellow': 'bg-yellow-500',
+        'green': 'bg-emerald-500',
+        'blue': 'bg-blue-500',
+        'purple': 'bg-purple-500',
+        'pink': 'bg-pink-500',
+        'red': 'bg-red-500',
+    };
+    return colors[notionColor] || 'bg-blue-500';
 }
