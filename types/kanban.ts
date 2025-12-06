@@ -3,24 +3,29 @@ export type Lead = {
   id: string;
   nome: string;
   telefone: string;
-  status: string; // Ex: "Novo Lead", "Em Contato" (Nome exato do Notion)
+  
+  // ONDE O LEAD ESTÁ (Colunas do Kanban)
+  status: string; // Ex: "Novo Lead", "Em Contato"
   funil: string;  // Ex: "Vendas", "Locação"
-  score: number;
-  empresa?: string;
+  
+  // QUALIDADE DO LEAD (Badges coloridos)
+  leadScoreTag: string; // Ex: "Quente", "Morno", "Frio"
+  leadScore: number;    // Ex: 90, 50, 20
+  
+  cidade: string;
+  interesse: string;
   createdAt: string;
 };
 
-export type KanbanStage = {
-  id: string; // Nome exato do status no Notion (Ex: "Novo Lead")
+export type Stage = {
+  id: string;
   title: string;
   color: string;
-  rules?: {
-    requireObs?: boolean;
-  };
+  rules?: { requireObs?: boolean };
 };
 
 export type Pipeline = {
-  id: string; // Ex: "vendas"
+  id: string;
   title: string;
-  stages: KanbanStage[];
+  stages: Stage[];
 };

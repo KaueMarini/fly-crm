@@ -11,14 +11,17 @@ export async function POST(request: Request) {
     const response = await notion.databases.retrieve({ database_id: databaseId });
     const db = response as any;
     
-    const statusProp = db.properties?.['Status'];
-    const currentOptions = statusProp.select.options;
+    // Pega opções atuais de 'Funil'
+    const funilProp = db.properties?.['Funil'];
+    if (!funilProp) throw new Error("Coluna 'Funil' não existe no Notion.");
+
+    const currentOptions = funilProp.select.options;
     const updatedOptions = [...currentOptions, { name }];
 
     await notion.databases.update({
         database_id: databaseId,
         properties: {
-            'Status': { select: { options: updatedOptions } }
+            'Funil': { select: { options: updatedOptions } }
         }
     } as any);
 

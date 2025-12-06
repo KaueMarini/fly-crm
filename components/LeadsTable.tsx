@@ -3,23 +3,15 @@
 import { useState, useMemo, useRef, useEffect } from 'react';
 import { Search, Calendar, Filter, ChevronDown, Check, X, MapPin, Wallet, Building2, User } from 'lucide-react';
 import { SummaryCell } from './SummaryCell';
-
-interface Lead {
-  id: string;
-  nome: string;
-  telefone: string;
-  status: string;
-  cidades: string[]; // Agora é uma lista de strings
-  interesse: string;
-  createdAt: string;
-  leadScore: number;
-  perfil: string;
-}
+import { Lead } from '@/types/kanban'; // Importando a tipagem correta
 
 export function LeadsTable({ initialLeads }: { initialLeads: Lead[] }) {
   // --- Estados ---
   const [searchName, setSearchName] = useState('');
-  const [statusFilter, setStatusFilter] = useState('Todos');
+  
+  // Filtros
+  const [scoreFilter, setScoreFilter] = useState('Todos'); // Antigo "Status" (Quente/Frio)
+  const [pipelineStatusFilter, setPipelineStatusFilter] = useState('Todos'); // Novo (Etapa do Funil)
   const [profileFilter, setProfileFilter] = useState('Todos');
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
@@ -29,12 +21,11 @@ export function LeadsTable({ initialLeads }: { initialLeads: Lead[] }) {
   const [isLocationDropdownOpen, setIsLocationDropdownOpen] = useState(false);
   const locationDropdownRef = useRef<HTMLDivElement>(null);
 
-  // --- Lista de Cidades Únicas (Extrai todas as cidades de todos os leads) ---
+  // --- Lista de Cidades Únicas ---
   const uniqueCities = useMemo(() => {
-    // flatMap junta todas as arrays de cidades em uma só lista
-    const allCities = initialLeads.flatMap(l => l.cidades);
-    // Filtra vazios e duplicatas
-    const validCities = allCities.filter(c => c && c !== 'Não informada' && c !== 'Não Identificada');
+    // O backend agora manda 'cidades' como array de strings
+    const allCities = initialLeads.flatMap(l => (l as any).cidades || []);
+    const validCities = allCities.filter((c: string) => c && c !== 'Não informada' && c !== 'Não Identificada');
     return Array.from(new Set(validCities)).sort();
   }, [initialLeads]);
 
@@ -55,25 +46,32 @@ export function LeadsTable({ initialLeads }: { initialLeads: Lead[] }) {
     );
   };
 
-  // --- Lógica de Filtragem ---
+  // --- Lógica de Filtragem (CORRIGIDA) ---
   const filteredLeads = useMemo(() => {
     return initialLeads.filter(lead => {
       // 1. Texto
       const matchesSearch = lead.nome.toLowerCase().includes(searchName.toLowerCase()) || 
                             lead.telefone.includes(searchName);
 
-      // 2. Status
-      const matchesStatus = statusFilter === 'Todos' || 
-                            lead.status.toLowerCase() === statusFilter.toLowerCase();
+      // 2. Temperatura (Quente/Frio) - CORREÇÃO: Usa leadScoreTag
+      const matchesScore = scoreFilter === 'Todos' || 
+                           lead.leadScoreTag?.toLowerCase() === scoreFilter.toLowerCase();
 
-      // 3. Perfil
-      const matchesProfile = profileFilter === 'Todos' || lead.perfil === profileFilter;
+      // 3. Etapa do Funil (Novo filtro opcional)
+      const matchesPipeline = pipelineStatusFilter === 'Todos' || 
+                              lead.status === pipelineStatusFilter;
 
-      // 4. Localização (Verifica se ALGUMA cidade do lead está nos filtros selecionados)
+      // 4. Perfil (Investidor/Moradia)
+      // O tipo Lead pode não ter 'perfil' explícito no TS, usamos cast se necessário ou ajustamos o type
+      const leadPerfil = (lead as any).perfil || 'Geral';
+      const matchesProfile = profileFilter === 'Todos' || leadPerfil === profileFilter;
+
+      // 5. Localização (Múltipla)
+      const leadCities = (lead as any).cidades || [];
       const matchesLocation = selectedCities.length === 0 || 
-                              lead.cidades.some(city => selectedCities.includes(city));
+                              leadCities.some((city: string) => selectedCities.includes(city));
 
-      // 5. Data
+      // 6. Data
       let matchesDate = true;
       if (startDate || endDate) {
         const leadDate = new Date(lead.createdAt).setHours(0,0,0,0);
@@ -83,13 +81,14 @@ export function LeadsTable({ initialLeads }: { initialLeads: Lead[] }) {
         if (end && leadDate > end) matchesDate = false;
       }
 
-      return matchesSearch && matchesStatus && matchesProfile && matchesLocation && matchesDate;
+      return matchesSearch && matchesScore && matchesPipeline && matchesProfile && matchesLocation && matchesDate;
     });
-  }, [initialLeads, searchName, statusFilter, profileFilter, selectedCities, startDate, endDate]);
+  }, [initialLeads, searchName, scoreFilter, pipelineStatusFilter, profileFilter, selectedCities, startDate, endDate]);
 
   const clearFilters = () => {
     setSearchName('');
-    setStatusFilter('Todos');
+    setScoreFilter('Todos');
+    setPipelineStatusFilter('Todos');
     setProfileFilter('Todos');
     setSelectedCities([]);
     setStartDate('');
@@ -118,20 +117,19 @@ export function LeadsTable({ initialLeads }: { initialLeads: Lead[] }) {
 
             <div className="h-6 w-px bg-slate-800 hidden sm:block mx-1"></div>
 
-            {/* Filtro Status (Sem Emojis) */}
+            {/* Filtro Temperatura (Antigo Status) */}
             <select 
               className="bg-slate-900 border border-slate-700 hover:border-slate-600 rounded-lg py-2 px-3 text-sm text-slate-300 focus:outline-none focus:border-blue-500 cursor-pointer min-w-[120px]"
-              value={statusFilter}
-              onChange={(e) => setStatusFilter(e.target.value)}
+              value={scoreFilter}
+              onChange={(e) => setScoreFilter(e.target.value)}
             >
-              <option value="Todos">Status: Todos</option>
-              <option value="Quente">Quente</option>
-              <option value="Morno">Morno</option>
-              <option value="Frio">Frio</option>
-              <option value="Novo">Novo</option>
+              <option value="Todos">Temperatura</option>
+              <option value="Quente">🔥 Quente</option>
+              <option value="Morno">😐 Morno</option>
+              <option value="Frio">❄️ Frio</option>
             </select>
 
-            {/* Filtro Perfil (Sem Emojis) */}
+            {/* Filtro Perfil */}
             <select 
               className="bg-slate-900 border border-slate-700 hover:border-slate-600 rounded-lg py-2 px-3 text-sm text-slate-300 focus:outline-none focus:border-blue-500 cursor-pointer min-w-[120px]"
               value={profileFilter}
@@ -140,10 +138,9 @@ export function LeadsTable({ initialLeads }: { initialLeads: Lead[] }) {
               <option value="Todos">Perfil: Todos</option>
               <option value="Investidor">Investidor</option>
               <option value="Moradia">Moradia</option>
-              <option value="Geral">Geral</option>
             </select>
 
-            {/* Dropdown Multi-Select de Localização */}
+            {/* Dropdown Cidades */}
             <div className="relative" ref={locationDropdownRef}>
               <button 
                 className={`flex items-center justify-between gap-2 bg-slate-900 border ${selectedCities.length > 0 ? 'border-blue-500/50 text-blue-400' : 'border-slate-700 text-slate-300 hover:border-slate-600'} rounded-lg py-2 px-3 text-sm min-w-[160px] transition-all`}
@@ -160,7 +157,7 @@ export function LeadsTable({ initialLeads }: { initialLeads: Lead[] }) {
               {isLocationDropdownOpen && (
                 <div className="absolute top-full left-0 mt-2 w-56 bg-slate-900 border border-slate-700 rounded-lg shadow-2xl z-50 p-2 animate-in fade-in zoom-in-95 duration-100">
                   <div className="max-h-60 overflow-y-auto space-y-1 custom-scrollbar">
-                    {uniqueCities.map(city => (
+                    {uniqueCities.map((city: any) => (
                       <div 
                         key={city}
                         onClick={() => toggleCity(city)}
@@ -236,7 +233,7 @@ export function LeadsTable({ initialLeads }: { initialLeads: Lead[] }) {
               <th className="px-6 py-4">Perfil</th>
               <th className="px-6 py-4 w-[200px]">Localizações</th>
               <th className="px-6 py-4 w-1/3">Resumo</th>
-              <th className="px-6 py-4">Score</th>
+              <th className="px-6 py-4">Etapa & Score</th>
               <th className="px-6 py-4 text-right">Data</th>
             </tr>
           </thead>
@@ -254,35 +251,37 @@ export function LeadsTable({ initialLeads }: { initialLeads: Lead[] }) {
                 </td>
               </tr>
             ) : (
-              filteredLeads.map((lead) => (
-                <tr key={lead.id} className="hover:bg-slate-800/30 transition-colors group">
+              filteredLeads.map((lead) => {
+                // Tipagem local para evitar erros de TS dentro do map
+                const l = lead as any;
+                return (
+                <tr key={l.id} className="hover:bg-slate-800/30 transition-colors group">
                   <td className="px-6 py-4">
                     <div className="flex flex-col">
-                      <span className="text-white font-medium text-sm">{lead.nome}</span>
-                      <span className="text-blue-400/80 text-xs font-mono mt-0.5">{lead.telefone}</span>
+                      <span className="text-white font-medium text-sm">{l.nome}</span>
+                      <span className="text-blue-400/80 text-xs font-mono mt-0.5">{l.telefone}</span>
                     </div>
                   </td>
 
                   <td className="px-6 py-4">
                     <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium border ${
-                      lead.perfil === 'Investidor' ? 'bg-purple-950/30 text-purple-300 border-purple-500/20' :
-                      lead.perfil === 'Moradia' ? 'bg-orange-950/30 text-orange-300 border-orange-500/20' :
+                      l.perfil === 'Investidor' ? 'bg-purple-950/30 text-purple-300 border-purple-500/20' :
+                      l.perfil === 'Moradia' ? 'bg-orange-950/30 text-orange-300 border-orange-500/20' :
                       'bg-slate-800/50 text-slate-400 border-slate-700'
                     }`}>
-                      {lead.perfil === 'Investidor' && <Wallet size={11} />}
-                      {lead.perfil === 'Moradia' && <Building2 size={11} />}
-                      {lead.perfil === 'Geral' && <User size={11} />}
-                      {lead.perfil}
+                      {l.perfil === 'Investidor' && <Wallet size={11} />}
+                      {l.perfil === 'Moradia' && <Building2 size={11} />}
+                      {l.perfil === 'Geral' && <User size={11} />}
+                      {l.perfil}
                     </span>
                   </td>
 
-                  {/* Renderiza as cidades como etiquetas separadas */}
                   <td className="px-6 py-4">
                     <div className="flex flex-wrap gap-1.5">
-                      {lead.cidades.length === 1 && lead.cidades[0] === 'Não informada' ? (
+                      {(!l.cidades || l.cidades.length === 0 || l.cidades[0] === 'Não informada') ? (
                         <span className="text-slate-600 text-xs">-</span>
                       ) : (
-                        lead.cidades.map((city, idx) => (
+                        l.cidades.map((city: string, idx: number) => (
                           <span key={idx} className="flex items-center gap-1 bg-slate-800 border border-slate-700 text-slate-300 px-2 py-0.5 rounded text-[11px]">
                             <MapPin size={10} className="text-pink-500" />
                             {city}
@@ -293,41 +292,38 @@ export function LeadsTable({ initialLeads }: { initialLeads: Lead[] }) {
                   </td>
 
                   <td className="px-6 py-4">
-                    <SummaryCell content={lead.interesse} />
+                    <SummaryCell content={l.interesse} />
                   </td>
 
+                  {/* Etapa (Kanban) e Temperatura (Score) */}
                   <td className="px-6 py-4">
                     <div className="flex flex-col gap-1.5">
+                       {/* Mostra a Etapa do Funil */}
+                       <span className="text-[10px] text-slate-400 uppercase font-bold">
+                          {l.status}
+                       </span>
+                       {/* Mostra a Temperatura */}
                       <span className={`inline-flex self-start items-center px-2 py-0.5 rounded text-[10px] uppercase font-bold tracking-wide border ${
-                        lead.status.toLowerCase().includes('quente') 
+                        l.leadScoreTag?.toLowerCase().includes('quente') 
                           ? 'bg-emerald-950/30 text-emerald-400 border-emerald-500/20' 
-                          : lead.status.toLowerCase().includes('morno')
+                          : l.leadScoreTag?.toLowerCase().includes('morno')
                           ? 'bg-yellow-950/30 text-yellow-400 border-yellow-500/20'
                           : 'bg-blue-950/30 text-blue-400 border-blue-500/20'
                       }`}>
-                        {lead.status}
+                        {l.leadScoreTag}
                       </span>
-                      <div className="w-16 h-1 bg-slate-800 rounded-full overflow-hidden">
-                        <div 
-                          className={`h-full ${
-                            lead.leadScore >= 70 ? 'bg-emerald-500' : 
-                            lead.leadScore >= 40 ? 'bg-yellow-500' : 'bg-blue-500'
-                          }`} 
-                          style={{ width: `${Math.min(lead.leadScore, 100)}%` }}
-                        ></div>
-                      </div>
                     </div>
                   </td>
 
                   <td className="px-6 py-4 text-right">
                     <span className="text-slate-400 text-xs font-mono bg-slate-900 px-2 py-1 rounded border border-slate-800">
-                      {new Date(lead.createdAt).toLocaleDateString('pt-BR', {
+                      {new Date(l.createdAt).toLocaleDateString('pt-BR', {
                         day: '2-digit', month: '2-digit'
                       })}
                     </span>
                   </td>
                 </tr>
-              ))
+              )})
             )}
           </tbody>
         </table>
