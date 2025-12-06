@@ -1,161 +1,200 @@
-'use client';
+"use client";
 
 import { useState, useEffect } from 'react';
 import { DndContext, DragEndEvent } from '@dnd-kit/core';
 import { KanbanColumn } from './KanbanColumn';
-import { Filter, Plus, Loader2, Settings, X } from 'lucide-react';
-import { useRouter } from 'next/navigation';
-import { Lead, Pipeline } from '@/types/kanban';
+import { Filter, Plus } from 'lucide-react';
 
-export function KanbanBoard({ initialLeads, serverPipelines }: { initialLeads: Lead[], serverPipelines: Record<string, Pipeline> }) {
+// --- Definição de Tipos ---
+interface Column {
+  id: string;
+  title: string;
+  color: string;
+  rules?: {
+    requireObs?: boolean;
+  };
+}
+
+// Configuração dos Funis
+const FUNNELS: Record<string, Column[]> = {
+  vendas: [
+    { id: 'novo', title: 'Novo Lead', color: 'bg-blue-500' },
+    { id: 'contato', title: 'Em Contato', color: 'bg-yellow-500' },
+    { id: 'qualificado', title: 'Qualificado', color: 'bg-purple-500', rules: { requireObs: true } },
+    { id: 'proposta', title: 'Proposta Enviada', color: 'bg-orange-500' },
+    { id: 'fechado', title: 'Venda Fechada', color: 'bg-emerald-500' },
+  ],
+  locacao: [
+    { id: 'novo', title: 'Interessado', color: 'bg-blue-500' },
+    { id: 'visita', title: 'Visita Agendada', color: 'bg-yellow-500' },
+    { id: 'doc', title: 'Análise Doc', color: 'bg-purple-500' },
+    { id: 'alugado', title: 'Contrato Assinado', color: 'bg-emerald-500' },
+  ]
+};
+
+export function KanbanBoard({ initialLeads }: { initialLeads: any[] }) {
+  // --- Estados ---
+  const [activeFunnel, setActiveFunnel] = useState<string>('vendas');
+  const [leads, setLeads] = useState(initialLeads);
   
-  // Pega o primeiro funil disponível como padrão
-  const firstFunnelId = Object.keys(serverPipelines)[0] || 'Vendas';
-  
-  const [activeFunnel, setActiveFunnel] = useState<string>(firstFunnelId);
-  const [pipelines, setPipelines] = useState(serverPipelines);
-  const [leads, setLeads] = useState<Lead[]>(initialLeads);
-  
+  // Estado para controle de Hidratação (Evita erro no Next.js)
   const [isMounted, setIsMounted] = useState(false);
-  const [loading, setLoading] = useState(false);
-  const [showAdmin, setShowAdmin] = useState(false);
-  const router = useRouter();
 
-  useEffect(() => { setIsMounted(true); }, []);
+  // Estados para Modais
+  const [showObsModal, setShowObsModal] = useState(false);
+  const [pendingMove, setPendingMove] = useState<any>(null);
 
-  const currentPipeline = pipelines[activeFunnel] || pipelines[firstFunnelId];
+  // --- Efeito de Montagem ---
+  useEffect(() => {
+    setIsMounted(true);
+  }, []);
 
-  // --- AÇÕES DE ADMINISTRAÇÃO ---
+  // --- Função: Adicionar Manualmente ---
+  const handleAddManualLead = () => {
+    const nome = prompt("Nome do Lead:");
+    if (!nome) return;
 
-  const handleCreateFunnel = async () => {
-      const name = prompt("Nome do Novo Funil (ex: Pós-Venda):");
-      if (!name) return;
+    const newLead = {
+      id: `manual_${Date.now()}`, // Gera ID temporário
+      nome: nome,
+      telefone: "Sem telefone",
+      status: FUNNELS[activeFunnel][0].id, // Adiciona na primeira etapa do funil atual
+      funil: activeFunnel,
+      score: 10,
+    };
 
-      setLoading(true);
-      await fetch('/api/pipelines/create', {
-          method: 'POST',
-          body: JSON.stringify({ name })
-      });
-      router.refresh();
-      setLoading(false);
+    setLeads((prev) => [newLead, ...prev]);
   };
 
-  const handleCreateStage = async () => {
-      const name = prompt("Nome da Nova Coluna (ex: Aguardando):");
-      if (!name) return;
-
-      setLoading(true);
-      await fetch('/api/pipelines/add-stage', {
-          method: 'POST',
-          body: JSON.stringify({ name })
-      });
-      router.refresh();
-      setLoading(false);
+  // --- Função: Excluir Card ---
+  const handleDeleteLead = (id: string) => {
+    if (confirm("Tem certeza que deseja excluir este card?")) {
+      setLeads((prev) => prev.filter(l => l.id !== id));
+    }
   };
 
-  // --- MOVIMENTAÇÃO ---
+  // --- Lógica de Drag & Drop ---
+  const handleDragEnd = (event: DragEndEvent) => {
+    const { active, over } = event;
+    if (!over) return;
 
-  const handleDragEnd = async (event: DragEndEvent) => {
-      const { active, over } = event;
-      if (!over) return;
+    const leadId = active.id;
+    const newStatus = over.id as string;
+    const currentLead = leads.find(l => l.id === leadId);
 
-      const leadId = active.id as string;
-      const newStatus = over.id as string;
+    // Se soltou na mesma coluna, não faz nada
+    if (currentLead?.status === newStatus) return;
 
-      // Otimista
-      setLeads(prev => prev.map(l => l.id === leadId ? { ...l, status: newStatus, funil: activeFunnel } : l));
-      
-      // Salva
-      await fetch('/api/leads/update', {
-          method: 'POST',
-          body: JSON.stringify({ pageId: leadId, status: newStatus })
-      });
-      router.refresh();
+    // Verifica Regras de Negócio da Coluna Alvo
+    const targetColumn = FUNNELS[activeFunnel].find(c => c.id === newStatus);
+    
+    if (targetColumn?.rules?.requireObs) {
+      // Pausa o movimento e pede observação
+      setPendingMove({ leadId, newStatus });
+      setShowObsModal(true);
+      return;
+    }
+
+    // Executa movimento
+    moveLead(leadId as string, newStatus);
   };
 
-  // --- CRIAR LEAD (Agora pede o funil) ---
-  
-  const handleAddLead = async () => {
-      const nome = prompt("Nome do Lead:");
-      if (!nome) return;
-
-      // Cria no funil ATIVO e na primeira coluna dele
-      const firstStage = currentPipeline.stages[0].id;
-      
-      const tempLead: Lead = { 
-          id: `temp_${Date.now()}`, nome, telefone: '...', 
-          status: firstStage, funil: activeFunnel, 
-          leadScoreTag: 'Frio', leadScore: 10, cidade: '', interesse: '', createdAt: '' 
-      };
-
-      setLeads(prev => [tempLead, ...prev]);
-
-      await fetch('/api/leads/create', {
-          method: 'POST',
-          body: JSON.stringify({ nome, status: firstStage, funil: activeFunnel })
-      });
-      router.refresh();
+  const moveLead = (id: string, status: string, observation?: string) => {
+    setLeads((prev) => 
+      prev.map(l => l.id === id ? { ...l, status } : l)
+    );
+    console.log(`Lead ${id} movido para ${status}. Obs: ${observation || 'Nenhuma'}`);
   };
 
-  if (!isMounted) return null;
+  const confirmMove = (observation: string) => {
+    if (pendingMove) {
+      moveLead(pendingMove.leadId, pendingMove.newStatus, observation);
+      setPendingMove(null);
+      setShowObsModal(false);
+    }
+  };
+
+  // --- Renderização Segura (Client-Side Only) ---
+  if (!isMounted) {
+    return null; // Evita renderizar no servidor e causar erro de ID
+  }
 
   return (
-    <div className="h-full flex flex-col relative">
-        {loading && <div className="absolute top-2 right-2 bg-blue-600 text-white text-xs px-3 py-1 rounded-full animate-pulse z-50">Processando...</div>}
-
-        {/* HEADER E CONTROLES */}
-        <div className="flex justify-between mb-6 bg-slate-900 p-4 rounded-xl border border-slate-800">
-            <div className="flex items-center gap-4">
-                <span className="text-slate-400 text-sm font-medium flex items-center gap-2">
-                    <Filter size={16} /> Funil:
-                </span>
-                <select 
-                    value={activeFunnel} 
-                    onChange={(e) => setActiveFunnel(e.target.value)}
-                    className="bg-slate-800 border border-slate-700 text-white text-sm rounded-lg px-3 py-2 outline-none cursor-pointer"
-                >
-                    {Object.values(pipelines).map(p => (
-                        <option key={p.id} value={p.id}>{p.title}</option>
-                    ))}
-                </select>
-                
-                {/* Botão Engrenagem (Admin) */}
-                <button onClick={() => setShowAdmin(!showAdmin)} className={`p-2 rounded hover:bg-slate-800 ${showAdmin ? 'text-blue-400' : 'text-slate-500'}`}>
-                    <Settings size={18} />
-                </button>
-            </div>
-            
-            <button onClick={handleAddLead} className="bg-blue-600 hover:bg-blue-500 text-white px-4 py-2 rounded-lg text-sm font-bold flex items-center gap-2 transition-colors">
-                <Plus size={16} /> Novo Lead
-            </button>
+    <div className="h-full flex flex-col">
+      {/* Barra de Controles */}
+      <div className="flex items-center justify-between mb-6 bg-slate-900 p-4 rounded-xl border border-slate-800">
+        <div className="flex items-center gap-4">
+          <span className="text-slate-400 text-sm font-medium flex items-center gap-2">
+            <Filter size={16} /> Funil:
+          </span>
+          <select 
+            value={activeFunnel}
+            onChange={(e) => setActiveFunnel(e.target.value)}
+            className="bg-slate-800 border border-slate-700 text-white text-sm rounded-lg px-3 py-2 outline-none focus:border-blue-500"
+          >
+            <option value="vendas">Vendas 💰</option>
+            <option value="locacao">Locação 🏠</option>
+          </select>
         </div>
+        
+        {/* Botão Novo Card */}
+        <button 
+          onClick={handleAddManualLead}
+          className="bg-blue-600 hover:bg-blue-500 text-white px-4 py-2 rounded-lg text-sm font-bold transition-colors flex items-center gap-2"
+        >
+          <Plus size={18} /> Novo Card
+        </button>
+      </div>
 
-        {/* PAINEL ADMIN (Aparece ao clicar na engrenagem) */}
-        {showAdmin && (
-            <div className="mb-4 p-4 bg-slate-900/50 border border-blue-900/30 rounded-xl flex gap-4 animate-in slide-in-from-top-2">
-                <button onClick={handleCreateFunnel} className="bg-slate-800 hover:bg-slate-700 text-blue-400 border border-blue-500/30 px-3 py-1.5 rounded text-xs font-bold flex gap-2 items-center">
-                    <Plus size={14}/> Criar Novo Funil
-                </button>
-                <button onClick={handleCreateStage} className="bg-slate-800 hover:bg-slate-700 text-emerald-400 border border-emerald-500/30 px-3 py-1.5 rounded text-xs font-bold flex gap-2 items-center">
-                    <Plus size={14}/> Criar Nova Coluna
-                </button>
-            </div>
-        )}
+      {/* Área do Kanban (Colunas) */}
+      <DndContext onDragEnd={handleDragEnd}>
+        <div className="flex-1 flex gap-4 overflow-x-auto pb-4">
+          {FUNNELS[activeFunnel].map((col) => (
+            <KanbanColumn 
+              key={col.id} 
+              column={col} 
+              // Filtra apenas os leads que pertencem a esta coluna
+              leads={leads.filter(l => l.status === col.id)}
+              // Passa a função de deletar para a coluna (que passará para o card)
+              onDelete={handleDeleteLead} 
+            />
+          ))}
+        </div>
+      </DndContext>
 
-        {/* BOARD */}
-        <DndContext onDragEnd={handleDragEnd}>
-            <div className="flex-1 flex gap-4 overflow-x-auto pb-4 scrollbar-thin scrollbar-thumb-slate-700">
-                {currentPipeline?.stages.map(stage => (
-                    <KanbanColumn 
-                        key={stage.id} 
-                        column={stage} 
-                        // Filtra leads que pertencem a ESTE funil e ESTA coluna
-                        leads={leads.filter(l => l.status === stage.id && l.funil === activeFunnel)} 
-                        onDelete={() => {}} 
-                    />
-                ))}
+      {/* Modal de Observação Obrigatória */}
+      {showObsModal && (
+        <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 backdrop-blur-sm">
+          <div className="bg-slate-900 p-6 rounded-xl border border-slate-700 w-96 shadow-2xl animate-in fade-in zoom-in duration-200">
+            <h3 className="text-white font-bold text-lg mb-2">⚠️ Observação Obrigatória</h3>
+            <p className="text-slate-400 text-sm mb-4">Para esta etapa, é necessário registrar o motivo:</p>
+            <textarea 
+              id="obs-input"
+              className="w-full bg-slate-950 border border-slate-800 rounded-lg p-3 text-white text-sm mb-4 h-24 focus:border-blue-500 outline-none resize-none"
+              placeholder="Escreva aqui..."
+              autoFocus
+            />
+            <div className="flex justify-end gap-2">
+              <button 
+                onClick={() => { setShowObsModal(false); setPendingMove(null); }}
+                className="px-4 py-2 text-slate-400 hover:text-white transition-colors"
+              >
+                Cancelar
+              </button>
+              <button 
+                onClick={() => {
+                  const obs = (document.getElementById('obs-input') as HTMLTextAreaElement).value;
+                  if(obs.trim()) confirmMove(obs);
+                  else alert("Por favor, escreva uma observação.");
+                }}
+                className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg font-medium transition-colors"
+              >
+                Salvar e Mover
+              </button>
             </div>
-        </DndContext>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
