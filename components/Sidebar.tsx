@@ -10,7 +10,8 @@ import {
   LogOut, 
   Lightbulb, 
   MessageSquare,
-  SquareKanban // Ícone para o Kanban
+  SquareKanban, 
+  Target // Ícone adicionado para o Smart Match
 } from 'lucide-react';
 
 export function Sidebar() {
@@ -53,6 +54,14 @@ export function Sidebar() {
           icon={<Users size={20} />} 
           label="Lista de Leads" 
           active={isActive('/leads')} 
+        />
+        
+        {/* Nova Funcionalidade Smart Match */}
+        <NavItem 
+          href="/opportunities" 
+          icon={<Target size={20} />} 
+          label="Smart Match AI" 
+          active={isActive('/opportunities')} 
         />
         
         <div className="pt-4 pb-2 pl-4 text-xs font-semibold text-slate-500 uppercase tracking-wider">
