@@ -1,199 +1,212 @@
 "use client";
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { DndContext, DragEndEvent } from '@dnd-kit/core';
 import { KanbanColumn } from './KanbanColumn';
-import { Filter, Plus } from 'lucide-react';
+import { Search, User, Calendar, Archive, RotateCcw, Undo2, Loader2, BarChart2 } from 'lucide-react';
 
-// --- Definição de Tipos ---
-interface Column {
-  id: string;
-  title: string;
-  color: string;
-  rules?: {
-    requireObs?: boolean;
-  };
-}
-
-// Configuração dos Funis
-const FUNNELS: Record<string, Column[]> = {
-  vendas: [
-    { id: 'novo', title: 'Novo Lead', color: 'bg-blue-500' },
-    { id: 'contato', title: 'Em Contato', color: 'bg-yellow-500' },
-    { id: 'qualificado', title: 'Qualificado', color: 'bg-purple-500', rules: { requireObs: true } },
-    { id: 'proposta', title: 'Proposta Enviada', color: 'bg-orange-500' },
-    { id: 'fechado', title: 'Venda Fechada', color: 'bg-emerald-500' },
-  ],
-  locacao: [
-    { id: 'novo', title: 'Interessado', color: 'bg-blue-500' },
-    { id: 'visita', title: 'Visita Agendada', color: 'bg-yellow-500' },
-    { id: 'doc', title: 'Análise Doc', color: 'bg-purple-500' },
-    { id: 'alugado', title: 'Contrato Assinado', color: 'bg-emerald-500' },
-  ]
-};
+const COLUMNS = [
+  { id: 'contato', title: 'Em Contato', notionStatus: 'Em Contato', color: 'bg-blue-500' },
+  { id: 'qualificado', title: 'Qualificado', notionStatus: 'Qualificado', color: 'bg-purple-500' },
+  { id: 'reuniao_ag', title: 'Reunião Agendada', notionStatus: 'Reunião Agendada', color: 'bg-pink-500' },
+  { id: 'reuniao_ok', title: 'Reunião Feita', notionStatus: 'Reunião Feita', color: 'bg-emerald-500' },
+];
 
 export function KanbanBoard({ initialLeads }: { initialLeads: any[] }) {
-  // --- Estados ---
-  const [activeFunnel, setActiveFunnel] = useState<string>('vendas');
   const [leads, setLeads] = useState(initialLeads);
-  
-  // Estado para controle de Hidratação (Evita erro no Next.js)
   const [isMounted, setIsMounted] = useState(false);
+  const [loading, setLoading] = useState(false);
 
-  // Estados para Modais
-  const [showObsModal, setShowObsModal] = useState(false);
-  const [pendingMove, setPendingMove] = useState<any>(null);
+  // Filtros
+  const [showArchived, setShowArchived] = useState(false);
+  const [search, setSearch] = useState('');
+  const [profileFilter, setProfileFilter] = useState('Todos');
+  const [dateFilter, setDateFilter] = useState('');
+  const [minScore, setMinScore] = useState(0); // Filtro de Score (0 a 100)
 
-  // --- Efeito de Montagem ---
-  useEffect(() => {
-    setIsMounted(true);
-  }, []);
+  useEffect(() => { setIsMounted(true); }, []);
 
-  // --- Função: Adicionar Manualmente ---
-  const handleAddManualLead = () => {
-    const nome = prompt("Nome do Lead:");
-    if (!nome) return;
-
-    const newLead = {
-      id: `manual_${Date.now()}`, // Gera ID temporário
-      nome: nome,
-      telefone: "Sem telefone",
-      status: FUNNELS[activeFunnel][0].id, // Adiciona na primeira etapa do funil atual
-      funil: activeFunnel,
-      score: 10,
-    };
-
-    setLeads((prev) => [newLead, ...prev]);
-  };
-
-  // --- Função: Excluir Card ---
-  const handleDeleteLead = (id: string) => {
-    if (confirm("Tem certeza que deseja excluir este card?")) {
-      setLeads((prev) => prev.filter(l => l.id !== id));
-    }
-  };
-
-  // --- Lógica de Drag & Drop ---
-  const handleDragEnd = (event: DragEndEvent) => {
+  // --- Mover Card ---
+  const handleDragEnd = async (event: DragEndEvent) => {
     const { active, over } = event;
     if (!over) return;
 
-    const leadId = active.id;
-    const newStatus = over.id as string;
-    const currentLead = leads.find(l => l.id === leadId);
+    const leadId = active.id as string;
+    const columnId = over.id as string;
+    const targetCol = COLUMNS.find(c => c.id === columnId);
 
-    // Se soltou na mesma coluna, não faz nada
-    if (currentLead?.status === newStatus) return;
+    if (!targetCol) return;
 
-    // Verifica Regras de Negócio da Coluna Alvo
-    const targetColumn = FUNNELS[activeFunnel].find(c => c.id === newStatus);
-    
-    if (targetColumn?.rules?.requireObs) {
-      // Pausa o movimento e pede observação
-      setPendingMove({ leadId, newStatus });
-      setShowObsModal(true);
-      return;
-    }
+    setLeads(prev => prev.map(l => l.id === leadId ? { ...l, status: columnId } : l));
 
-    // Executa movimento
-    moveLead(leadId as string, newStatus);
-  };
-
-  const moveLead = (id: string, status: string, observation?: string) => {
-    setLeads((prev) => 
-      prev.map(l => l.id === id ? { ...l, status } : l)
-    );
-    console.log(`Lead ${id} movido para ${status}. Obs: ${observation || 'Nenhuma'}`);
-  };
-
-  const confirmMove = (observation: string) => {
-    if (pendingMove) {
-      moveLead(pendingMove.leadId, pendingMove.newStatus, observation);
-      setPendingMove(null);
-      setShowObsModal(false);
+    try {
+      await fetch('/api/leads/update', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ pageId: leadId, status: targetCol.notionStatus })
+      });
+    } catch (error) {
+      console.error("Erro ao salvar:", error);
     }
   };
 
-  // --- Renderização Segura (Client-Side Only) ---
-  if (!isMounted) {
-    return null; // Evita renderizar no servidor e causar erro de ID
-  }
+  const handleArchive = async (id: string) => {
+    if (!confirm("Arquivar lead?")) return;
+    setLeads(prev => prev.map(l => l.id === id ? { ...l, status: 'arquivado' } : l));
+    try { await fetch('/api/leads/archive', { method: 'POST', body: JSON.stringify({ pageId: id }) }); } catch (e) {}
+  };
+
+  const handleRestore = async (id: string) => {
+    setLeads(prev => prev.map(l => l.id === id ? { ...l, status: 'contato' } : l));
+    try { await fetch('/api/leads/update', { method: 'POST', body: JSON.stringify({ pageId: id, status: 'Em Contato' }) }); } catch (e) {}
+  };
+
+  // --- Filtragem ---
+  const filteredLeads = useMemo(() => {
+    return leads.filter(lead => {
+      // 1. Arquivado
+      const isArchived = lead.status === 'arquivado';
+      if (showArchived && !isArchived) return false;
+      if (!showArchived && isArchived) return false;
+
+      // 2. Score (Maior ou igual ao slider)
+      if (lead.leadScore < minScore) return false;
+
+      // 3. Texto
+      const matchSearch = lead.nome.toLowerCase().includes(search.toLowerCase()) || 
+                          lead.telefone.includes(search);
+      // 4. Perfil
+      const matchProfile = profileFilter === 'Todos' || 
+                           lead.perfil.toLowerCase() === profileFilter.toLowerCase();
+      
+      // 5. Data
+      let matchDate = true;
+      if (dateFilter) {
+        const leadDate = new Date(lead.createdAt).setHours(0,0,0,0);
+        const filterDate = new Date(dateFilter).setHours(0,0,0,0);
+        matchDate = leadDate >= filterDate;
+      }
+
+      return matchSearch && matchProfile && matchDate;
+    });
+  }, [leads, showArchived, search, profileFilter, dateFilter, minScore]);
+
+  if (!isMounted) return null;
 
   return (
     <div className="h-full flex flex-col">
-      {/* Barra de Controles */}
-      <div className="flex items-center justify-between mb-6 bg-slate-900 p-4 rounded-xl border border-slate-800">
-        <div className="flex items-center gap-4">
-          <span className="text-slate-400 text-sm font-medium flex items-center gap-2">
-            <Filter size={16} /> Funil:
-          </span>
-          <select 
-            value={activeFunnel}
-            onChange={(e) => setActiveFunnel(e.target.value)}
-            className="bg-slate-800 border border-slate-700 text-white text-sm rounded-lg px-3 py-2 outline-none focus:border-blue-500"
-          >
-            <option value="vendas">Vendas 💰</option>
-            <option value="locacao">Locação 🏠</option>
-          </select>
-        </div>
+      {/* BARRA DE FILTROS */}
+      <div className="mb-6 bg-slate-900/90 backdrop-blur-sm p-4 rounded-xl border border-slate-800 shadow-xl sticky top-0 z-20 flex flex-col xl:flex-row gap-4 justify-between items-center">
         
-        {/* Botão Novo Card */}
-        <button 
-          onClick={handleAddManualLead}
-          className="bg-blue-600 hover:bg-blue-500 text-white px-4 py-2 rounded-lg text-sm font-bold transition-colors flex items-center gap-2"
-        >
-          <Plus size={18} /> Novo Card
-        </button>
-      </div>
-
-      {/* Área do Kanban (Colunas) */}
-      <DndContext onDragEnd={handleDragEnd}>
-        <div className="flex-1 flex gap-4 overflow-x-auto pb-4">
-          {FUNNELS[activeFunnel].map((col) => (
-            <KanbanColumn 
-              key={col.id} 
-              column={col} 
-              // Filtra apenas os leads que pertencem a esta coluna
-              leads={leads.filter(l => l.status === col.id)}
-              // Passa a função de deletar para a coluna (que passará para o card)
-              onDelete={handleDeleteLead} 
+        <div className="flex flex-wrap items-center gap-3 w-full xl:w-auto">
+          {/* Busca */}
+          <div className="relative group">
+            <Search className="absolute left-3 top-2.5 text-slate-500 w-4 h-4" />
+            <input 
+              className="bg-slate-950 border border-slate-700 rounded-lg py-2 pl-9 pr-4 text-sm text-white focus:border-blue-500 w-48"
+              placeholder="Buscar..."
+              value={search}
+              onChange={e => setSearch(e.target.value)}
             />
-          ))}
-        </div>
-      </DndContext>
+          </div>
 
-      {/* Modal de Observação Obrigatória */}
-      {showObsModal && (
-        <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 backdrop-blur-sm">
-          <div className="bg-slate-900 p-6 rounded-xl border border-slate-700 w-96 shadow-2xl animate-in fade-in zoom-in duration-200">
-            <h3 className="text-white font-bold text-lg mb-2">⚠️ Observação Obrigatória</h3>
-            <p className="text-slate-400 text-sm mb-4">Para esta etapa, é necessário registrar o motivo:</p>
-            <textarea 
-              id="obs-input"
-              className="w-full bg-slate-950 border border-slate-800 rounded-lg p-3 text-white text-sm mb-4 h-24 focus:border-blue-500 outline-none resize-none"
-              placeholder="Escreva aqui..."
-              autoFocus
+          {/* Perfil */}
+          <div className="relative">
+            <User className="absolute left-3 top-2.5 text-slate-500 w-4 h-4" />
+            <select 
+              className="bg-slate-950 border border-slate-700 rounded-lg py-2 pl-9 pr-8 text-sm text-slate-300 focus:border-blue-500 appearance-none cursor-pointer"
+              value={profileFilter}
+              onChange={e => setProfileFilter(e.target.value)}
+            >
+              <option value="Todos">Todos Perfis</option>
+              <option value="Investidor">Investidor</option>
+              <option value="Moradia">Moradia</option>
+            </select>
+          </div>
+
+          {/* Data */}
+          <div className="flex items-center bg-slate-950 border border-slate-700 rounded-lg px-3 py-2">
+            <Calendar className="text-slate-500 w-4 h-4 mr-2" />
+            <input 
+              type="date" 
+              className="bg-transparent text-sm text-slate-300 focus:outline-none"
+              value={dateFilter}
+              onChange={e => setDateFilter(e.target.value)}
             />
-            <div className="flex justify-end gap-2">
-              <button 
-                onClick={() => { setShowObsModal(false); setPendingMove(null); }}
-                className="px-4 py-2 text-slate-400 hover:text-white transition-colors"
-              >
-                Cancelar
-              </button>
-              <button 
-                onClick={() => {
-                  const obs = (document.getElementById('obs-input') as HTMLTextAreaElement).value;
-                  if(obs.trim()) confirmMove(obs);
-                  else alert("Por favor, escreva uma observação.");
-                }}
-                className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg font-medium transition-colors"
-              >
-                Salvar e Mover
-              </button>
+          </div>
+
+          {/* Filtro de Score (Slider) */}
+          <div className="flex items-center gap-3 bg-slate-950 border border-slate-700 rounded-lg px-4 py-2 h-[38px]">
+            <BarChart2 className="text-slate-500 w-4 h-4" />
+            <div className="flex flex-col w-32">
+              <div className="flex justify-between text-[10px] text-slate-400 mb-1">
+                <span>Min Score</span>
+                <span className="text-blue-400 font-bold">{minScore}</span>
+              </div>
+              <input 
+                type="range" 
+                min="0" 
+                max="100" 
+                step="5"
+                value={minScore}
+                onChange={(e) => setMinScore(Number(e.target.value))}
+                className="w-full h-1 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-blue-500"
+              />
             </div>
           </div>
         </div>
+
+        {/* Botão Arquivados */}
+        <button 
+          onClick={() => setShowArchived(!showArchived)}
+          className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-bold border transition-all ${
+            showArchived 
+              ? 'bg-blue-600 text-white border-blue-500 hover:bg-blue-500'
+              : 'bg-slate-800 text-slate-400 border-slate-700 hover:text-white'
+          }`}
+        >
+          {showArchived ? <Undo2 size={16} /> : <Archive size={16} />}
+          {showArchived ? 'Voltar ao Funil' : 'Arquivados'}
+        </button>
+      </div>
+
+      {/* ÁREA DE CONTEÚDO */}
+      {showArchived ? (
+        <div className="flex-1 bg-slate-900/50 rounded-xl border border-slate-800 p-6 overflow-y-auto">
+          <h3 className="text-white font-bold mb-4 flex items-center gap-2">
+            <Archive className="text-orange-500" /> Leads Arquivados ({filteredLeads.length})
+          </h3>
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+            {filteredLeads.map(lead => (
+              <div key={lead.id} className="bg-slate-950 p-4 rounded-xl border border-slate-800 shadow-lg flex flex-col justify-between hover:border-slate-600 transition-all">
+                <div>
+                  <h4 className="text-white font-medium mb-1">{lead.nome}</h4>
+                  <p className="text-slate-500 text-xs mb-3">{lead.telefone}</p>
+                  <div className="text-[10px] bg-slate-800 text-slate-300 px-2 py-1 rounded inline-block mb-2">Score: {lead.leadScore}</div>
+                </div>
+                <button 
+                  onClick={() => handleRestore(lead.id)}
+                  className="w-full py-2 bg-emerald-500/10 text-emerald-500 border border-emerald-500/20 rounded-lg hover:bg-emerald-500 hover:text-white transition-all text-xs font-bold flex items-center justify-center gap-2"
+                >
+                  <RotateCcw size={14} /> Restaurar
+                </button>
+              </div>
+            ))}
+          </div>
+        </div>
+      ) : (
+        <DndContext onDragEnd={handleDragEnd}>
+          <div className="flex-1 flex gap-4 overflow-x-auto pb-4 custom-scrollbar">
+            {COLUMNS.map((col) => (
+              <KanbanColumn 
+                key={col.id} 
+                column={col} 
+                leads={filteredLeads.filter(l => l.status === col.id)}
+                onDelete={handleArchive}
+              />
+            ))}
+          </div>
+        </DndContext>
       )}
     </div>
   );

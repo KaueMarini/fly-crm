@@ -1,103 +1,137 @@
-import { Client } from '@notionhq/client';
+// lib/notion.ts
 
-if (!process.env.NOTION_KEY) {
-  throw new Error("🚨 ERRO CRÍTICO: A variável NOTION_KEY não foi encontrada no arquivo .env.local");
-}
-if (!process.env.NOTION_DATABASE_ID) {
-  throw new Error("🚨 ERRO CRÍTICO: A variável NOTION_DATABASE_ID não foi encontrada no arquivo .env.local");
-}
-
-const notion = new Client({
-  auth: process.env.NOTION_KEY,
-});
+const NOTION_KEY = process.env.NOTION_KEY;
+const NOTION_DATABASE_ID = process.env.NOTION_DATABASE_ID;
 
 export async function getLeads() {
+  if (!NOTION_KEY || !NOTION_DATABASE_ID) {
+    console.error("🚨 ERRO: Variáveis de ambiente do Notion não encontradas.");
+    return [];
+  }
+
   try {
-    const databaseId = process.env.NOTION_DATABASE_ID as string;
-
-    const database = await notion.databases.retrieve({ database_id: databaseId });
-    const dataSources = (database as any).data_sources;
-    
-    if (!dataSources || dataSources.length === 0) {
-      throw new Error("Nenhuma fonte de dados encontrada.");
-    }
-    const dataSourceId = dataSources[0].id;
-
-    const response = await notion.dataSources.query({
-      data_source_id: dataSourceId,
-      sorts: [{ timestamp: 'created_time', direction: 'descending' }],
+    const response = await fetch(`https://api.notion.com/v1/databases/${NOTION_DATABASE_ID}/query`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${NOTION_KEY}`,
+        'Notion-Version': '2022-06-28',
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        sorts: [{ timestamp: 'created_time', direction: 'descending' }],
+      }),
+      next: { revalidate: 0 }
     });
 
-    const leads = response.results.map((page: any) => {
+    if (!response.ok) {
+      throw new Error(`Erro na API do Notion: ${response.status} ${response.statusText}`);
+    }
+
+    const data = await response.json();
+
+    const leads = data.results.map((page: any) => {
       const props = page.properties;
 
-      const telefone = props.Telefone?.title?.[0]?.plain_text || 'Sem Telefone';
-      const nome = props.Nome?.rich_text?.[0]?.plain_text || 'Sem Nome';
-      const resumo = props.Resumo?.rich_text?.[0]?.plain_text || 'Sem interesse registrado';
-      const dataCriacao = props.Data?.date?.start || page.created_time;
+      // --- Helper: Busca propriedade ignorando maiúsculas/minúsculas e espaços ---
+      const getProp = (keys: string[]) => {
+        for (const key of keys) {
+          const foundKey = Object.keys(props).find(k => 
+            k.toLowerCase().trim() === key.toLowerCase().trim()
+          );
+          if (foundKey) return props[foundKey];
+        }
+        return null;
+      };
 
-      // --- CORREÇÃO: Tratamento de Localização Múltipla ---
-      const locProp = props['Localização De Interesse'] || 
-                      props['Localização de Interesse'] || 
-                      props['Localização'];
-      
+      // 1. Nome
+      const propNome = getProp(['Nome', 'Name', 'Lead', 'Cliente']);
+      const nome = propNome?.title?.[0]?.plain_text || 'Sem Nome';
+
+      // 2. Telefone
+      const propFone = getProp(['Telefone', 'Phone', 'Celular', 'Whatsapp']);
+      const telefone = propFone?.rich_text?.[0]?.plain_text || 
+                       propFone?.phone_number || 
+                       'Sem Telefone';
+
+      // 3. Status
+      const propStatus = getProp(['Status', 'Estágio', 'Stage']);
+      const status = propStatus?.select?.name || 
+                     propStatus?.rich_text?.[0]?.plain_text || 
+                     'Novo Lead';
+
+      // 4. Localização
+      const propLoc = getProp(['Localização', 'Cidade', 'Cidades', 'Localização de Interesse']);
       let cidades: string[] = [];
+      if (propLoc) {
+        if (propLoc.type === 'multi_select') cidades = propLoc.multi_select.map((o: any) => o.name);
+        else if (propLoc.type === 'select' && propLoc.select) cidades = [propLoc.select.name];
+        else if (propLoc.type === 'rich_text') {
+          const t = propLoc.rich_text.map((part: any) => part.plain_text).join('');
+          if(t) cidades = t.split(',').map((c: string) => c.trim());
+        }
+      }
+      if (cidades.length === 0) cidades = ['Não informada'];
 
-      if (locProp) {
-        if (locProp.type === 'multi_select') {
-          // Se for Multi-Select no Notion, pega todas as tags
-          cidades = locProp.multi_select.map((opt: any) => opt.name);
-        } else if (locProp.type === 'select') {
-          // Se for Select simples
-          if (locProp.select?.name) cidades.push(locProp.select.name);
-        } else if (locProp.type === 'rich_text') {
-          // Se for Texto, quebra nas vírgulas (ex: "Itapema, Porto Belo")
-          const text = locProp.rich_text[0]?.plain_text || '';
-          if (text) {
-            cidades = text.split(',').map((c: string) => c.trim()).filter((c: string) => c !== '');
+      // 5. Perfil (CORREÇÃO DE LEITURA DE TEXTO)
+      const propPerfil = getProp(['Perfil', 'Tipo', 'Interesse']);
+      let perfil = 'Geral';
+      
+      if (propPerfil) {
+        if (propPerfil.type === 'select') {
+          // Se for do tipo Select
+          perfil = propPerfil.select?.name || 'Geral';
+        } else if (propPerfil.type === 'rich_text') {
+          // Se for do tipo Texto: junta todos os fragmentos de texto
+          const textoCompleto = propPerfil.rich_text
+            .map((part: any) => part.plain_text)
+            .join('')
+            .trim();
+            
+          if (textoCompleto.length > 0) {
+            perfil = textoCompleto;
           }
         }
       }
 
-      if (cidades.length === 0) cidades = ['Não informada'];
-
-      // --- Status e Score ---
-      const statusRaw = props.Leadscore?.rich_text?.[0]?.plain_text || 
-                        props.Leadscore?.select?.name || 
-                        'Novo';
-
+      // 6. Score (Numérico ou Texto)
+      const propScore = getProp(['Leadscore', 'Score', 'Pontuação', 'Lead Score']);
       let scoreNum = 0;
-      const statusLower = statusRaw.toLowerCase();
-      if (statusLower.includes('quente')) scoreNum = 90;
-      else if (statusLower.includes('morno')) scoreNum = 50;
-      else if (statusLower.includes('frio')) scoreNum = 20;
-
-      // --- Perfil ---
-      const resumoLower = resumo.toLowerCase();
-      let perfil = 'Geral';
-      if (resumoLower.includes('investimento') || resumoLower.includes('investidor')) {
-        perfil = 'Investidor';
-      } else if (resumoLower.includes('moradia') || resumoLower.includes('morar')) {
-        perfil = 'Moradia';
+      
+      if (propScore?.type === 'number') {
+        scoreNum = propScore.number ?? 0;
+      } else if (propScore?.type === 'rich_text') {
+         // Converte texto "85" para número 85
+         const txt = propScore.rich_text?.[0]?.plain_text || '0';
+         scoreNum = parseInt(txt.replace(/\D/g, ''), 10) || 0;
+      } else {
+        // Fallback automático se não tiver campo
+        scoreNum = status.toLowerCase().includes('quente') ? 90 : 
+                   status.toLowerCase().includes('morno') ? 50 : 20;
       }
+
+      // 7. Resumo
+      const propResumo = getProp(['Resumo', 'Obs', 'Observações']);
+      const resumo = propResumo?.rich_text?.map((t: any) => t.plain_text).join('') || '';
+
+      const dataCriacao = props.Data?.date?.start || page.created_time;
 
       return {
         id: page.id,
         nome: nome,
         telefone: telefone,
-        status: statusRaw,
-        cidades: cidades, // Agora é um ARRAY (Lista)
+        status: status,
+        cidades: cidades,
         interesse: resumo,
         createdAt: dataCriacao,
-        leadScore: scoreNum,
-        perfil: perfil,
+        perfil: perfil, // Agora deve vir correto "Moradia" ou "Investidor"
+        leadScore: scoreNum
       };
     });
 
     return leads;
 
   } catch (error: any) {
-    console.error("❌ ERRO NO NOTION:", error.message);
+    console.error("❌ ERRO AO BUSCAR LEADS:", error.message);
     return [];
   }
 }
