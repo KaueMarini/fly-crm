@@ -1,19 +1,22 @@
 export type Lead = {
   id: string;
   nome: string;
-  empresa?: string;
   telefone: string;
-  status: string; // A coluna do Kanban
-  funil: string;  // 'vendas' | 'locacao' | 'pos-venda'
-  score: number;
-  valor?: number;
+  
+  // Kanban (Coluna)
+  status: string; 
+  
+  // Dados
+  leadScore: string;    // "Quente", "Morno", "Frio"
+  localizacao: string;
+  perfil: string;
+  resumo: string;
+  data: string;
+  funil: string;
 };
 
-export type Column = {
+export type KanbanColumn = {
   id: string;
   title: string;
   color: string;
-  rules?: {
-    requireObservation?: boolean; // Regra: Exige observação ao entrar aqui?
-  };
 };
