@@ -10,8 +10,9 @@ import {
   LogOut, 
   Lightbulb, 
   MessageSquare,
-  SquareKanban, 
-  Target // Ícone adicionado para o Smart Match
+  SquareKanban,
+  Target,
+  Play // Ícone para o Modo Foco
 } from 'lucide-react';
 
 export function Sidebar() {
@@ -26,8 +27,8 @@ export function Sidebar() {
     <aside className="w-64 bg-slate-950 h-screen fixed left-0 top-0 text-slate-300 flex flex-col border-r border-slate-800 shadow-2xl z-50">
       
       <div className="p-6 border-b border-slate-800">
-        <h1 className="text-2xl font-bold text-white flex items-center gap-2 tracking-tight">
-          🦅 Fly<span className="text-blue-500">CRM</span>
+        <h1 className="text-xl font-bold text-white flex items-center gap-2 tracking-tight">
+          🏢 Imobiliária<span className="text-blue-500">CRM</span>
         </h1>
       </div>
 
@@ -39,33 +40,42 @@ export function Sidebar() {
           active={isActive('/')} 
         />
         
-        <div className="pt-4 pb-2 pl-4 text-xs font-semibold text-slate-500 uppercase tracking-wider">
-          Vendas
+        {/* BOTÃO DE AÇÃO - MODO FOCO */}
+        <Link 
+          href="/focus"
+          className="flex items-center gap-3 px-4 py-3 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 text-white shadow-lg shadow-blue-900/20 hover:scale-[1.02] active:scale-[0.98] transition-all group mb-4 mt-2 border border-blue-400/20"
+        >
+          <div className="bg-white/20 p-1 rounded-full">
+            <Play size={14} className="fill-current" />
+          </div>
+          <span className="font-bold text-sm tracking-wide">Iniciar Foco</span>
+        </Link>
+
+        <div className="pt-2 pb-2 pl-4 text-xs font-semibold text-slate-500 uppercase tracking-wider">
+          Gestão
         </div>
 
         <NavItem 
           href="/kanban" 
           icon={<SquareKanban size={20} />} 
-          label="Pipeline / Funil" 
+          label="Pipeline" 
           active={isActive('/kanban')} 
         />
         <NavItem 
           href="/leads" 
           icon={<Users size={20} />} 
-          label="Lista de Leads" 
+          label="Base de Leads" 
           active={isActive('/leads')} 
         />
-        
-        {/* Nova Funcionalidade Smart Match */}
         <NavItem 
           href="/opportunities" 
           icon={<Target size={20} />} 
-          label="Smart Match AI" 
+          label="Smart Match" 
           active={isActive('/opportunities')} 
         />
         
         <div className="pt-4 pb-2 pl-4 text-xs font-semibold text-slate-500 uppercase tracking-wider">
-          Inteligência
+          Automação
         </div>
 
         <NavItem 
@@ -110,7 +120,7 @@ function NavItem({ href, icon, label, active = false }: { href: string, icon: Re
       href={href} 
       className={`flex items-center gap-3 px-4 py-3 rounded-lg transition-all duration-200 ${
         active 
-          ? 'bg-blue-600/10 text-blue-400 border border-blue-600/20 shadow-[0_0_15px_rgba(37,99,235,0.1)]' 
+          ? 'bg-blue-600/10 text-blue-400 border border-blue-600/20' 
           : 'hover:bg-slate-800/50 hover:text-white'
       }`}
     >

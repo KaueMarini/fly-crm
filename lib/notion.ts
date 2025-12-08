@@ -18,7 +18,13 @@ export async function getLeads() {
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        sorts: [{ timestamp: 'created_time', direction: 'descending' }],
+        // MANTIDO: Ordenação para priorizar Pendentes
+        sorts: [
+            { property: 'Status Foco', direction: 'ascending' }, 
+            { timestamp: 'created_time', direction: 'descending' }
+        ]
+        // REMOVIDO: O filtro que escondia os descartados globalmente.
+        // Agora eles vêm do banco e filtramos apenas na tela de Foco.
       }),
       next: { revalidate: 0 }
     });
@@ -72,16 +78,14 @@ export async function getLeads() {
       }
       if (cidades.length === 0) cidades = ['Não informada'];
 
-      // 5. Perfil (CORREÇÃO DE LEITURA DE TEXTO)
+      // 5. Perfil
       const propPerfil = getProp(['Perfil', 'Tipo', 'Interesse']);
       let perfil = 'Geral';
       
       if (propPerfil) {
         if (propPerfil.type === 'select') {
-          // Se for do tipo Select
           perfil = propPerfil.select?.name || 'Geral';
         } else if (propPerfil.type === 'rich_text') {
-          // Se for do tipo Texto: junta todos os fragmentos de texto
           const textoCompleto = propPerfil.rich_text
             .map((part: any) => part.plain_text)
             .join('')
@@ -93,18 +97,16 @@ export async function getLeads() {
         }
       }
 
-      // 6. Score (Numérico ou Texto)
+      // 6. Score
       const propScore = getProp(['Leadscore', 'Score', 'Pontuação', 'Lead Score']);
       let scoreNum = 0;
       
       if (propScore?.type === 'number') {
         scoreNum = propScore.number ?? 0;
       } else if (propScore?.type === 'rich_text') {
-         // Converte texto "85" para número 85
          const txt = propScore.rich_text?.[0]?.plain_text || '0';
          scoreNum = parseInt(txt.replace(/\D/g, ''), 10) || 0;
       } else {
-        // Fallback automático se não tiver campo
         scoreNum = status.toLowerCase().includes('quente') ? 90 : 
                    status.toLowerCase().includes('morno') ? 50 : 20;
       }
@@ -112,6 +114,10 @@ export async function getLeads() {
       // 7. Resumo
       const propResumo = getProp(['Resumo', 'Obs', 'Observações']);
       const resumo = propResumo?.rich_text?.map((t: any) => t.plain_text).join('') || '';
+
+      // 8. Status Foco
+      const propStatusFoco = getProp(['Status Foco', 'Foco']);
+      const statusFoco = propStatusFoco?.select?.name || 'Pendente';
 
       const dataCriacao = props.Data?.date?.start || page.created_time;
 
@@ -123,8 +129,9 @@ export async function getLeads() {
         cidades: cidades,
         interesse: resumo,
         createdAt: dataCriacao,
-        perfil: perfil, // Agora deve vir correto "Moradia" ou "Investidor"
-        leadScore: scoreNum
+        perfil: perfil,
+        leadScore: scoreNum,
+        statusFoco: statusFoco
       };
     });
 
