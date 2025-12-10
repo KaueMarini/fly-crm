@@ -67,13 +67,6 @@ export function Sidebar() {
           label="Base de Leads" 
           active={isActive('/leads')} 
         />
-        <NavItem 
-          href="/opportunities" 
-          icon={<Target size={20} />} 
-          label="Smart Match" 
-          active={isActive('/opportunities')} 
-        />
-        
         <div className="pt-4 pb-2 pl-4 text-xs font-semibold text-slate-500 uppercase tracking-wider">
           Automação
         </div>
